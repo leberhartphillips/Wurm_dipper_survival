@@ -1,5 +1,5 @@
 #### European Dipper survival modelling
-## September 28, 2020
+## January 18, 2022
 ## Data: Ulrich Knief
 ## Script: Luke Eberhart-Phillips
 
@@ -11,8 +11,12 @@ if (!'BaSTA' %in% installed.packages()) install.packages('BaSTA') ; require(BaST
 if (!'ggpubr' %in% installed.packages()) install.packages('ggpubr') ; require(ggpubr)
 if (!'lubridate' %in% installed.packages()) install.packages('lubridate') ; require(lubridate)
 if (!'viridis' %in% installed.packages()) install.packages('viridis') ; require(viridis)
+if (!'patchwork' %in% installed.packages()) install.packages('patchwork') ; require(patchwork)
+if (!'gt' %in% installed.packages()) install.packages('gt') ; require(gt)
+if (!'RColorBrewer' %in% installed.packages()) install.packages('RColorBrewer') ; require(RColorBrewer)
 
-path <- "C:\\Users\\Knief\\Dropbox\\DBDipper\\SurvivalMARK\\"
+# path <- "C:\\Users\\Knief\\Dropbox\\DBDipper\\SurvivalMARK\\"
+path <- "data/"
 
 # (1) Prepare data ---
 dipper_df <- read.table(paste0(path,"data_MARK_dipper_2022.txt"), header = TRUE)
@@ -32,30 +36,53 @@ dipper_df_ch <-
   CensusToCaptHist(ID = dipper_df_join$ring, 
                    d = as.numeric(dipper_df_join$year),
                    timeInt = "Y") %>% 
-  dplyr::rename(ring = ID) %>%
+  mutate(ring = row.names(.)) %>% 
   dplyr::left_join(., dplyr::select(dipper_df_join, ring, sex, first_age, first_site), by = "ring") %>%
   distinct() %>% 
   dplyr::rename(site = first_site,
          age = first_age)
+  # dplyr::mutate(ring = as.character(ring)) %>% 
+  # dplyr::rename(ring = ID)
+  
 
 # Check sampling distribution 
 # conclusion: 
 # best to model Wurm alone due to poor sampling at other sites
 # drop sex due to limited high numbers of individuals of unknown sex
 # focus on age (a priori most likely to have an effect)
-sum_dat <- dipper_df %>% 
+sum_dat <- 
+  dipper_df %>% 
   dplyr::mutate(year = year(date)) %>% 
   dplyr::select(-date) %>% 
   dplyr::distinct() %>% 
   dplyr::group_by(site, ring, age, sex) %>%
   dplyr::summarise(n_encounters = n()) %>% 
   dplyr::group_by(site, age, sex) %>% 
-  dplyr::summarise(total_counters = sum(n_encounters),
+  dplyr::summarise(total_encounters = sum(n_encounters),
             total_ind = n_distinct(ring))
 sum_dat %>% print(n = Inf)
 
 # make capture history for MARK
+dipper_df_ch_full <- 
+  data.frame(ch = apply(dipper_df_ch[, 2:7], 1, paste, collapse = "")) %>%
+  bind_cols(., dplyr::select(dipper_df_ch, sex, site, age)) %>%
+  mutate(across(everything(), ~str_trim(.x))) %>%
+  mutate(across(everything(), ~str_replace_all(.x, fixed(" "), ""))) %>%
+  mutate(across(everything(), ~gsub("^$|^ $", NA, .x))) %>% 
+  mutate(age = as.factor(age)) %>% 
+  dplyr::select(-sex, -site)
+
 dipper_df_ch_wurm <- 
+  data.frame(ch = apply(dipper_df_ch[, 2:7], 1, paste, collapse = "")) %>%
+  bind_cols(., dplyr::select(dipper_df_ch, sex, site, age)) %>%
+  mutate(across(everything(), ~str_trim(.x))) %>%
+  mutate(across(everything(), ~str_replace_all(.x, fixed(" "), ""))) %>%
+  mutate(across(everything(), ~gsub("^$|^ $", NA, .x))) %>% 
+  filter(site == "Wuerm") %>%
+  mutate(age = as.factor(age)) %>% 
+  dplyr::select(-sex, -site)
+
+dipper_df_ch_not_wurm <- 
   data.frame(ch = apply(dipper_df_ch[, 2:7], 1, paste, collapse = "")) %>%
   bind_cols(., dplyr::select(dipper_df_ch, sex, site, age)) %>%
   mutate(across(everything(), ~str_trim(.x))) %>%
@@ -65,49 +92,104 @@ dipper_df_ch_wurm <-
   mutate(age = as.factor(age)) %>% 
   dplyr::select(-sex, -site)
 
-nrow(subset(dipper_df_ch_wurm, age=="J"))
-nrow(subset(dipper_df_ch_wurm, age=="A"))
-
 # Create processed RMark data formatted as Cormack-Jolly_Seber with 1 group
 # (age initally ringed), starting at year 2017, two age groups
 # (first-years and adults) in which the first-year stage only lasts for 
 # one year.
-dipper.proc <- RMark::process.data(dipper_df_ch_wurm, model = "CJS",
+dipper_full.proc <- RMark::process.data(dipper_df_ch_full, model = "CJS",
+                                   group = "age",
+                                   begin.time = 2017,
+                                   initial.age = c(1, 0))
+
+dipper_wurm.proc <- RMark::process.data(dipper_df_ch_wurm, model = "CJS",
+                                   group = "age",
+                                   begin.time = 2017,
+                                   initial.age = c(1, 0))
+
+dipper_not_wurm.proc <- RMark::process.data(dipper_df_ch_not_wurm, model = "CJS",
                                    group = "age",
                                    begin.time = 2017,
                                    initial.age = c(1, 0))
 
 # Create the design matrix from the processed mark-recapture datasets
-dipper.ddl <- RMark::make.design.data(dipper.proc)
+dipper_full.ddl <- RMark::make.design.data(dipper_full.proc)
+dipper_wurm.ddl <- RMark::make.design.data(dipper_wurm.proc)
+dipper_not_wurm.ddl <- RMark::make.design.data(dipper_not_wurm.proc)
 
 # adds juvenile / adult age field to design data in column "age"
-dipper.ddl <- RMark::add.design.data(data = dipper.proc,
-                                     ddl = dipper.ddl,
+dipper_full.ddl <- RMark::add.design.data(data = dipper_full.proc,
+                                     ddl = dipper_full.ddl,
                                      parameter = "Phi",
                                      type = "age",
-                                     bins = c(0, 1, 4),
+                                     bins = c(0, 1, dipper_full.proc$nocc),
                                      right = FALSE,
                                      name = "age", replace = TRUE)
 
-dipper.ddl$Phi$age[5] <- "[1,4]"
+dipper_wurm.ddl <- RMark::add.design.data(data = dipper_wurm.proc,
+                                     ddl = dipper_wurm.ddl,
+                                     parameter = "Phi",
+                                     type = "age",
+                                     bins = c(0, 1, dipper_wurm.proc$nocc),
+                                     right = FALSE,
+                                     name = "age", replace = TRUE)
 
-# create a dummy variable in the p design matrix called age2 which
-# is "0" for all ages > 1 and "1" for all ages < 2 (i.e, the juvenile stage)
-dipper.ddl$p$age2 = 0
-dipper.ddl$p$age2[dipper.ddl$p$group == "J" & dipper.ddl$p$Age < 2] = 1
+dipper_not_wurm.ddl <- RMark::add.design.data(data = dipper_not_wurm.proc,
+                                     ddl = dipper_not_wurm.ddl,
+                                     parameter = "Phi",
+                                     type = "age",
+                                     bins = c(0, 1, dipper_not_wurm.proc$nocc),
+                                     right = FALSE,
+                                     name = "age", replace = TRUE)
+
+dipper_full.ddl <- RMark::add.design.data(data = dipper_full.proc,
+                                          ddl = dipper_full.ddl,
+                                          parameter = "p",
+                                          type = "age",
+                                          bins = c(0, 1, dipper_full.proc$nocc),
+                                          right = TRUE,
+                                          name = "age", replace = TRUE)
+
+dipper_wurm.ddl <- RMark::add.design.data(data = dipper_wurm.proc,
+                                          ddl = dipper_wurm.ddl,
+                                          parameter = "p",
+                                          type = "age",
+                                          bins = c(0, 1, dipper_wurm.proc$nocc),
+                                          right = TRUE,
+                                          name = "age", replace = TRUE)
+
+dipper_not_wurm.ddl <- RMark::add.design.data(data = dipper_not_wurm.proc,
+                                              ddl = dipper_not_wurm.ddl,
+                                              parameter = "p",
+                                              type = "age",
+                                              bins = c(0, 1, dipper_not_wurm.proc$nocc),
+                                              right = TRUE,
+                                              name = "age", replace = TRUE)
+
+# dipper.ddl$Phi$age[5] <- "[1,4]"
+
+# # create a dummy variable in the p design matrix called age2 which
+# # is "0" for all ages > 1 and "1" for all ages < 2 (i.e, the juvenile stage)
+# dipper_full.ddl$p$age2 = 0
+# dipper_full.ddl$p$age2[dipper_full.ddl$p$group == "J" & dipper_full.ddl$p$Age < 2] = 1
+# 
+# dipper_wurm.ddl$p$age2 = 0
+# dipper_wurm.ddl$p$age2[dipper_wurm.ddl$p$group == "J" & dipper_wurm.ddl$p$Age < 2] = 1
+# 
+# dipper_not_wurm.ddl$p$age2 = 0
+# dipper_not_wurm.ddl$p$age2[dipper_not_wurm.ddl$p$group == "J" & dipper_not_wurm.ddl$p$Age < 2] = 1
 
 # check the parameter index matricies to see if the dummy variable is
 # is structured correctly...looks good
-PIMS(mark(dipper.proc,
-          dipper.ddl,
+PIMS(mark(dipper_full.proc,
+          dipper_full.ddl,
           model.parameters = list(Phi = list(formula = ~ age + time)),
           output = F, delete = TRUE, brief = TRUE,
           silent = TRUE, wrap = FALSE),
      "Phi")
 
-PIMS(mark(dipper.proc,
-          dipper.ddl,
-          model.parameters = list(p = list(formula = ~ age2 + time)),
+PIMS(mark(dipper_full.proc,
+          dipper_full.ddl,
+          model.parameters = list(p = list(formula = ~ age + time)),
           output = F, delete = TRUE, brief = TRUE,
           silent = TRUE, wrap = FALSE),
      "p")
@@ -126,7 +208,7 @@ dipper_encounter_analysis_run =
     p.dot = list(formula =  ~ 1)
     
     # age-dependent:
-    p.age2 = list(formula =  ~ age2)
+    p.age = list(formula =  ~ age)
     
     # create a list of candidate models for all the a models above that begin with 
     # either "Phi." or "p."
@@ -134,8 +216,8 @@ dipper_encounter_analysis_run =
     
     # specify the data, design matrix, delete unneeded output files, and 
     # run the models in Program MARK
-    model.list <-  RMark::mark.wrapper(cml, data = dipper.proc, 
-                                       ddl = dipper.ddl, delete = TRUE, 
+    model.list <-  RMark::mark.wrapper(cml, data = proc_data, 
+                                       ddl = design_data, delete = TRUE, 
                                        wrap = FALSE, threads = 1, brief = TRUE,
                                        silent = TRUE, output = FALSE)
     
@@ -144,9 +226,17 @@ dipper_encounter_analysis_run =
   }
 
 # run encounter models
-# best model is the null model
-dipper_encounter_analysis_out <-
-  dipper_encounter_analysis_run()
+dipper_encounter_analysis_full_out <-
+  dipper_encounter_analysis_run(proc_data = dipper_full.proc, 
+                               design_data = dipper_full.ddl)
+
+dipper_encounter_analysis_wurm_out <-
+  dipper_encounter_analysis_run(proc_data = dipper_wurm.proc, 
+                               design_data = dipper_wurm.ddl)
+
+dipper_encounter_analysis_not_wurm_out <-
+  dipper_encounter_analysis_run(proc_data = dipper_not_wurm.proc, 
+                               design_data = dipper_not_wurm.ddl)
 
 # then assess variation in apparent survival with age-dependent encounter rate
 dipper_survival_analysis_run = 
@@ -160,7 +250,7 @@ dipper_survival_analysis_run =
     
     # Models exploring variation in encounter probability
     # constant:
-    p.age2 = list(formula =  ~ age2)
+    p.age = list(formula =  ~ age)
     
     # create a list of candidate models for all the a models above that begin with 
     # either "Phi." or "p."
@@ -168,8 +258,8 @@ dipper_survival_analysis_run =
     
     # specify the data, design matrix, delete unneeded output files, and 
     # run the models in Program MARK
-    model.list <-  RMark::mark.wrapper(cml, data = dipper.proc, 
-                                       ddl = dipper.ddl, delete = TRUE, 
+    model.list <-  RMark::mark.wrapper(cml, data = proc_data, 
+                                       ddl = design_data, delete = TRUE, 
                                        wrap = FALSE, threads = 1, brief = TRUE,
                                        silent = TRUE, output = FALSE)
     
@@ -178,8 +268,17 @@ dipper_survival_analysis_run =
   }
 
 # run apparent survival models
-dipper_survival_analysis_out <-
-  dipper_survival_analysis_run()
+dipper_survival_analysis_full_out <-
+  dipper_survival_analysis_run(proc_data = dipper_full.proc, 
+                               design_data = dipper_full.ddl)
+
+dipper_survival_analysis_wurm_out <-
+  dipper_survival_analysis_run(proc_data = dipper_wurm.proc, 
+                               design_data = dipper_wurm.ddl)
+
+dipper_survival_analysis_not_wurm_out <-
+  dipper_survival_analysis_run(proc_data = dipper_not_wurm.proc, 
+                               design_data = dipper_not_wurm.ddl)
 
 # explore all model combinations 
 # (caution this is likely to produce false positives due to sample size issues)
@@ -209,13 +308,13 @@ dredge_dipper_survival_analysis_run =
     p.dot = list(formula =  ~ 1)
     
     # age-dependent:
-    p.age2 = list(formula =  ~ age2)
+    p.age = list(formula =  ~ age)
     
     # factorial variation across year:
     p.year = list(formula =  ~ time)
     
     # additive effects of sex and factorial year:
-    p.age2_year = list(formula =  ~ age2 + time)
+    p.age_year = list(formula =  ~ age + time)
     
     # create a list of candidate models for all the a models above that begin with 
     # either "Phi." or "p."
@@ -223,8 +322,8 @@ dredge_dipper_survival_analysis_run =
     
     # specify the data, design matrix, delete unneeded output files, and 
     # run the models in Program MARK
-    model.list <-  RMark::mark.wrapper(cml, data = dipper.proc, 
-                                       ddl = dipper.ddl, delete = TRUE, 
+    model.list <-  RMark::mark.wrapper(cml, data = proc_data, 
+                                       ddl = design_data, delete = TRUE, 
                                        wrap = FALSE, threads = 1, brief = TRUE,
                                        silent = TRUE, output = FALSE)
     
@@ -232,32 +331,117 @@ dredge_dipper_survival_analysis_run =
     return(model.list)
   }
 
-full_dipper_survival_analysis_out <-
-  dredge_dipper_survival_analysis_run()
+dredge_dipper_survival_analysis_full_out <-
+  dredge_dipper_survival_analysis_run(proc_data = dipper_full.proc, 
+                                      design_data = dipper_full.ddl)
+dredge_dipper_survival_analysis_wurm_out <-
+  dredge_dipper_survival_analysis_run(proc_data = dipper_wurm.proc, 
+                                      design_data = dipper_wurm.ddl)
+dredge_dipper_survival_analysis_not_wurm_out <-
+  dredge_dipper_survival_analysis_run(proc_data = dipper_not_wurm.proc, 
+                                      design_data = dipper_not_wurm.ddl)
 
 ##### Results ####
 # Extract the AIC model table from the model output
 # not alot of support for a "significant-effect" of age, but it is slightly
 # better than the null model and we have good a priori reasoning that there
 # should be an effect
-AIC_table_conservative <- 
-  dipper_survival_analysis_out$model.table
+full_AIC_table_conservative <- 
+  dipper_survival_analysis_full_out$model.table
+wurm_AIC_table_conservative <- 
+  dipper_survival_analysis_wurm_out$model.table
+not_wurm_AIC_table_conservative <- 
+  dipper_survival_analysis_not_wurm_out$model.table
 
 # Find the model number for the first ranked model of the AIC table
-top_mod_num <- 
-  as.numeric(rownames(dipper_survival_analysis_out$model.table[1,]))
+top_mod_num_full <- 
+  as.numeric(rownames(dipper_survival_analysis_full_out$model.table[1,]))
+wurm_mod_num_full <- 
+  as.numeric(rownames(dipper_survival_analysis_wurm_out$model.table[1,]))
+not_wurm_mod_num_full <- 
+  as.numeric(rownames(dipper_survival_analysis_not_wurm_out$model.table[1,]))
 
 # extract and format the transformed parameter estimates
-estimates <- 
-  dipper_survival_analysis_out[[top_mod_num]]$results$real %>% 
+estimates_full <- 
+  dipper_survival_analysis_full_out[[top_mod_num]]$results$real %>% 
   bind_cols(data.frame(str_split_fixed(rownames(.), " ", 
                                        n = 5)), .) %>% 
   dplyr::mutate(age = as.factor(ifelse(unlist(str_extract_all(X2,"[AJ]")) == "A", 
                                 "Adult","Juvenile")),
-         parameter = as.factor(ifelse(unlist(str_extract_all(X1,"[pP]")) == "p", 
+         parameter = as.factor(ifelse(unlist(str_extract_all(X1,"[pP]")) == "P", 
                                       "Phi","p"))) %>% 
-  dplyr::select(parameter, age, estimate, lcl, ucl)
+  dplyr::mutate(population = "All streams combined") %>% 
+  dplyr::select(population, parameter, age, estimate, lcl, ucl) %>% 
+  `rownames<-`( NULL )
 
+estimates_wurm <- 
+  dipper_survival_analysis_wurm_out[[top_mod_num]]$results$real %>% 
+  bind_cols(data.frame(str_split_fixed(rownames(.), " ", 
+                                       n = 5)), .) %>% 
+  dplyr::mutate(age = as.factor(ifelse(unlist(str_extract_all(X2,"[AJ]")) == "A", 
+                                       "Adult","Juvenile")),
+                parameter = as.factor(ifelse(unlist(str_extract_all(X1,"[pP]")) == "P", 
+                                             "Phi","p"))) %>% 
+  dplyr::mutate(population = "Wurm") %>% 
+  dplyr::select(population, parameter, age, estimate, lcl, ucl) %>% 
+  `rownames<-`( NULL )
+
+estimates_not_wurm <- 
+  dipper_survival_analysis_not_wurm_out[[top_mod_num]]$results$real %>% 
+  bind_cols(data.frame(str_split_fixed(rownames(.), " ", 
+                                       n = 5)), .) %>% 
+  dplyr::mutate(age = as.factor(ifelse(unlist(str_extract_all(X2,"[AJ]")) == "A", 
+                                       "Adult","Juvenile")),
+                parameter = as.factor(ifelse(unlist(str_extract_all(X1,"[pP]")) == "P", 
+                                             "Phi","p"))) %>% 
+  dplyr::mutate(population = "All streams except Wurm") %>% 
+  dplyr::select(population, parameter, age, estimate, lcl, ucl) %>% 
+  `rownames<-`( NULL )
+
+estimates_combined <- 
+  bind_rows(estimates_full, estimates_wurm, estimates_not_wurm) %>% 
+  mutate(coefString = ifelse(!is.na(lcl),
+                             paste0("[", 
+                                    round(lcl, 2), ", ", 
+                                    round(ucl, 2), "]"),
+                             NA))
+
+betas_full <- 
+  dipper_survival_analysis_full_out[[top_mod_num]]$results$beta %>% 
+  bind_cols(data.frame(X1 = rownames(.)), .) %>% 
+  dplyr::mutate(component = as.factor(ifelse(str_detect(X1,"Intercept"), "Intercept", "Age")), 
+                parameter = as.factor(ifelse(str_detect(X1,"Phi"), "Phi", "p"))) %>% 
+  dplyr::mutate(population = "All streams combined") %>% 
+  dplyr::select(population, parameter, component, estimate, lcl, ucl) %>% 
+  `rownames<-`( NULL )
+
+betas_wurm <- 
+  dipper_survival_analysis_wurm_out[[top_mod_num]]$results$beta %>% 
+  bind_cols(data.frame(X1 = rownames(.)), .) %>% 
+  dplyr::mutate(component = as.factor(ifelse(str_detect(X1,"Intercept"), "Intercept", "Age")), 
+                parameter = as.factor(ifelse(str_detect(X1,"Phi"), "Phi", "p"))) %>% 
+  dplyr::mutate(population = "Wurm") %>% 
+  dplyr::select(population, parameter, component, estimate, lcl, ucl) %>% 
+  `rownames<-`( NULL )
+
+betas_not_wurm <- 
+  dipper_survival_analysis_not_wurm_out[[top_mod_num]]$results$beta %>% 
+  bind_cols(data.frame(X1 = rownames(.)), .) %>% 
+  dplyr::mutate(component = as.factor(ifelse(str_detect(X1,"Intercept"), "Intercept", "Age")), 
+                parameter = as.factor(ifelse(str_detect(X1,"Phi"), "Phi", "p"))) %>% 
+  dplyr::mutate(population = "All streams except Wurm") %>% 
+  dplyr::select(population, parameter, component, estimate, lcl, ucl) %>% 
+  `rownames<-`( NULL )
+
+betas_combined <- 
+  bind_rows(betas_full, betas_wurm, betas_not_wurm) %>% 
+  mutate(coefString = ifelse(!is.na(lcl),
+                             paste0("[", 
+                                    round(lcl, 2), ", ", 
+                                    round(ucl, 2), "]"),
+                             NA))
+
+#### Uli plotting ####
 clr1 <- viridis(10)[6]
 clr2 <- viridis(11)[11]
 svg(filename=paste(path,"Survival1.svg",sep=""), height=90/25.4, width=70/25.4, family="Arial", pointsize = 10)
@@ -283,21 +467,12 @@ dev.off()
 #1         p    Adult 0.4400000 0.2629157 0.6337978
 #2         p Juvenile 0.2592593 0.1289173 0.4528708
 #3       Phi    Adult 1.0000000 1.0000000 1.0000000
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
+
   
 #### Plotting ####
 # first setup the plotting theme
 dipper_theme <- 
-  theme(text = element_text(family="Franklin Gothic Book"),
+  theme(text = element_text(family = "Franklin Gothic Book"),
         legend.position = "none",
         axis.title.x = element_blank(),
         axis.text.x = element_text(size = 10),
@@ -315,6 +490,14 @@ dipper_theme <-
         panel.border = element_rect(linetype = "solid", colour = "grey"),
         panel.background = element_rect(linetype = "solid", fill = "white"))
 
+
+# get sample sizes of individuals used to estimate age-specific rates
+dipper_df %>% 
+  dplyr::select(ring, age) %>%
+  distinct() %>% 
+  group_by(age) %>% 
+  summarise(N = n())
+
 # age-specific apparent survival plot
 Phi_plot <- 
   ggplot(data = filter(estimates, parameter == "Phi")) +
@@ -327,22 +510,22 @@ Phi_plot <-
   scale_y_continuous(limits = c(0, 1)) +
   scale_color_brewer(palette = "Dark2") +
   annotate(geom = "text", y = 0.95, x = 1.5, angle = 0,
-           label = "CJS model of European Dippers\n on the Wurm (2017-2020)", 
+           label = "CJS model of European Dippers\n on the Wurm (2017-2022)", 
            color = "grey30", size = 3) +
   annotate(geom = "text", y = 0.75, x = 1, angle = 0,
-           label = "N = 33 individuals", 
+           label = "N = 65 individuals", 
            color = "grey30", size = 2.5, fontface = 'italic') +
-  annotate(geom = "text", y = 0.55, x = 2, angle = 0,
-           label = "N = 46 individuals", 
+  annotate(geom = "text", y = 0.45, x = 2, angle = 0,
+           label = "N = 159 individuals", 
            color = "grey30", size = 2.5, fontface = 'italic') 
 
 # encounter probability plot
 p_plot <- 
   ggplot(data = filter(estimates, parameter == "p")) +
-  geom_errorbar(aes(x = year, ymin = lcl, ymax = ucl), 
+  geom_errorbar(aes(x = age, ymin = lcl, ymax = ucl), 
                 color = "black", size = 0.3, 
                 linetype = "solid", width = 0.1) +
-  geom_point(aes(x = year, y = estimate, color = age), color = "grey20", size = 3) +
+  geom_point(aes(x = age, y = estimate, color = age), color = "grey20", size = 3) +
   theme_bw() + 
   dipper_theme +
   theme(axis.title.x = element_blank(),
@@ -351,16 +534,80 @@ p_plot <-
   ylab("Encounter probability (± 95% CI)") +
   scale_y_continuous(limits = c(0, 1))
 
-# arrange multi-panelled plot
+# arrange multi-paneled plot
 Wurm_plot <-
-  ggarrange(Phi_plot, 
-            p_plot,
-            ncol = 2, align = "h",
-            widths = c(0.65, 0.35))
+  Phi_plot + p_plot
 
 # export plot to working directory
-ggsave(Wurm_plot,
-       filename = "dipper_survival_plot.jpeg",
-       width = 4,
+ggsave(Phi_plot,
+       filename = "figs/dipper_survival_2017-2022.jpeg",
+       width = 3,
        height = 4, 
        units = "in")
+
+#### Tabulation of results ####
+dipper_CJS_effect_size_table <- 
+  estimates_combined %>% 
+  dplyr::select(parameter, age, estimate, population, coefString) %>%
+  gt(groupname_col = "population") %>% 
+  cols_label(parameter = html("<i>Model</i>"),
+             estimate = "Mean estimate",
+             coefString = "95% confidence interval",
+             age = html("<i>structure</i>")) %>% 
+  fmt_number(columns = vars(estimate),
+             rows = 1:12,
+             decimals = 2,
+             use_seps = FALSE) %>% 
+  cols_align(align = "right",
+             columns = vars(parameter)) %>% 
+  cols_align(align = "left",
+             columns = vars(age)) %>% 
+  tab_options(row_group.font.weight = "bold",
+              row_group.background.color = brewer.pal(9,"Greys")[3],
+              table.font.size = 12,
+              data_row.padding = 3,
+              row_group.padding = 4,
+              summary_row.padding = 2,
+              column_labels.font.size = 14,
+              row_group.font.size = 12,
+              table.width = pct(50)) %>% 
+  tab_header(
+    title = "CJS model of European Dippers (2017 to 2022)",
+    subtitle = "Effect sizes"
+  )
+
+dipper_CJS_effect_size_table %>%
+  gtsave("dipper_CJS_effect_size_table.png", path = "tables/")
+
+dipper_CJS_betas_table <- 
+  betas_combined %>% 
+  dplyr::select(parameter, component, estimate, population, coefString) %>%
+  gt(groupname_col = "population") %>% 
+  cols_label(parameter = html("<i>Model</i>"),
+             estimate = "Mean estimate",
+             coefString = "95% confidence interval",
+             component = html("<i>structure</i>")) %>% 
+  fmt_number(columns = vars(estimate),
+             rows = 1:12,
+             decimals = 2,
+             use_seps = FALSE) %>% 
+  cols_align(align = "right",
+             columns = vars(parameter)) %>% 
+  cols_align(align = "left",
+             columns = vars(component)) %>% 
+  tab_options(row_group.font.weight = "bold",
+              row_group.background.color = brewer.pal(9,"Greys")[3],
+              table.font.size = 12,
+              data_row.padding = 3,
+              row_group.padding = 4,
+              summary_row.padding = 2,
+              column_labels.font.size = 14,
+              row_group.font.size = 12,
+              table.width = pct(50)) %>% 
+  tab_header(
+    title = "CJS model of European Dippers (2017 to 2022)",
+    subtitle = "Fixed effect coefficients"
+  )
+
+dipper_CJS_betas_table %>%
+  gtsave("dipper_CJS_betas_table.png", path = "tables/")
