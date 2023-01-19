@@ -111,7 +111,6 @@ dipper_sex.proc <- RMark::process.data(dipper_df_ch_sex, model = "CJS",
 
 # Create the design matrix from the processed mark-recapture datasets
 dipper_age_site.ddl <- RMark::make.design.data(dipper_age_site.proc)
-dipper_age_sex.ddl <- RMark::make.design.data(dipper_age_sex.proc)
 dipper_sex.ddl <- RMark::make.design.data(dipper_sex.proc)
 
 # adds juvenile / adult age field to design data in column "age"
@@ -163,14 +162,8 @@ age_site_dipper_encounter_analysis_run =
     # age-dependent:
     p.age = list(formula =  ~ age)
     
-    # sex-dependent:
-    # p.sex = list(formula =  ~ sex)
-    
     # site-dependent:
     p.site = list(formula =  ~ site)
-    
-    # age- and sex-dependent:
-    # p.age_sex = list(formula =  ~ age + sex)
     
     # age- and site-dependent:
     p.age_site = list(formula =  ~ age + site)
@@ -244,7 +237,7 @@ age_site_dipper_survival_analysis_run =
     Phi.age_site = list(formula =  ~ age + site)
     
     # Models exploring variation in encounter probability
-    # age-dependent (based on encounter analysis, above):
+    # age-dependent (based on encounter analysis, above, this is the best model):
     p.age = list(formula =  ~ age)
     
     # create a list of candidate models for all the a models above that begin with 
@@ -565,7 +558,7 @@ ggsave(Wurm_plot,
        height = 4, 
        units = "in")
 
- #### Tabulation of results ####
+#### Tabulation of results ####
 dipper_CJS_effect_size_table <- 
   estimates_combined %>% 
   mutate(structure = ifelse(parameter != "Phi" & str_detect(analysis, "sex"), "-", 
