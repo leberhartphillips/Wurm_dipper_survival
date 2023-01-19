@@ -194,7 +194,7 @@ sex_dipper_encounter_analysis_run =
     p.dot = list(formula =  ~ 1)
     
     # age-dependent:
-    p.sex = list(formula =  ~ age)
+    p.sex = list(formula =  ~ sex)
     
     # create a list of candidate models for all the a models above that begin with 
     # either "Phi." or "p."
@@ -433,20 +433,20 @@ betas_combined <-
                              NA))
 
 #### Uli plotting ####
-clr1 <- viridis(10)[6]
-clr2 <- viridis(11)[11]
-svg(filename=paste(path,"Survival1.svg",sep=""), height=90/25.4, width=70/25.4, family="Arial", pointsize = 10)
-par(mar=c(2.8, 2.8, 0.2, 0.2))
-par(mgp=c(1.2,0.2,0))
-plot(c(0,1),c(0,1), axes=FALSE, xlab="Altersklasse", ylab="Lokale Uberlebenswahrscheinlichkeit", tcl=-0.25, type="n")
-axis(2, at=seq(0,1,by=0.25), labels=c("0.00","0.25","0.50","0.75","1.00"), tcl=-0.25)
-axis(1, at=c(0.2,0.8), labels=c("Jungvogel","Altvogel"), tcl=-0.25)
-arrows(0.2,estimates$lcl[2],0.2,estimates$ucl[2],code=3,length=0.1,angle=90)
-arrows(0.8,estimates$lcl[1],0.8,estimates$ucl[1],code=3,length=0.1,angle=90)
-points(c(0.2), estimates$estimate[2], pch=23, bg=clr2, cex=sqrt(42)/2, type="b")
-points(c(0.8), estimates$estimate[1], pch=23, bg=clr1, cex=sqrt(33)/2, type="b")
-box()
-dev.off()
+# clr1 <- viridis(10)[6]
+# clr2 <- viridis(11)[11]
+# svg(filename=paste(path,"Survival1.svg",sep=""), height=90/25.4, width=70/25.4, family="Arial", pointsize = 10)
+# par(mar=c(2.8, 2.8, 0.2, 0.2))
+# par(mgp=c(1.2,0.2,0))
+# plot(c(0,1),c(0,1), axes=FALSE, xlab="Altersklasse", ylab="Lokale Uberlebenswahrscheinlichkeit", tcl=-0.25, type="n")
+# axis(2, at=seq(0,1,by=0.25), labels=c("0.00","0.25","0.50","0.75","1.00"), tcl=-0.25)
+# axis(1, at=c(0.2,0.8), labels=c("Jungvogel","Altvogel"), tcl=-0.25)
+# arrows(0.2,estimates$lcl[2],0.2,estimates$ucl[2],code=3,length=0.1,angle=90)
+# arrows(0.8,estimates$lcl[1],0.8,estimates$ucl[1],code=3,length=0.1,angle=90)
+# points(c(0.2), estimates$estimate[2], pch=23, bg=clr2, cex=sqrt(42)/2, type="b")
+# points(c(0.8), estimates$estimate[1], pch=23, bg=clr1, cex=sqrt(33)/2, type="b")
+# box()
+# dev.off()
 
 #  parameter      age  estimate       lcl       ucl
 #1         p    Adult 0.4400000 0.2629157 0.6337978
